@@ -1,8 +1,7 @@
 pipeline {
-
   agent {
     docker {
-      image 'maven:3.9.6-eclipse-temurin-17'
+      image 'abhishekf5/maven-abhishek-docker-agent:v1'   // ✅ FIXED
       args '--user root -v /var/run/docker.sock:/var/run/docker.sock -v $HOME/.m2:/root/.m2'
     }
   }
@@ -44,26 +43,21 @@ pipeline {
       }
     }
 
-    // ✅ FIXED DOCKER STAGE
     stage('Build and Push Docker Image') {
-      agent {
-        label ''   // 👈 forces host execution but keeps SAME workspace
-      }
-
       steps {
         script {
           sh '''
-            docker version   # ✅ check docker available
+            docker version   # ✅ debug
 
             cd java-maven-sonar-argocd-helm-k8s/spring-boot-app
-
-            ls -l target     # ✅ ensure jar exists
 
             docker build -t ${DOCKER_IMAGE} .
           '''
 
-          withDockerRegistry([credentialsId: 'docker-cred', url: '']) {
-            sh "docker push ${DOCKER_IMAGE}"
+          def dockerImage = docker.image("${DOCKER_IMAGE}")
+
+          docker.withRegistry('https://index.docker.io/v1/', "docker-cred") {
+            dockerImage.push()
           }
         }
       }
@@ -79,26 +73,18 @@ pipeline {
             sed -i "s+replaceImageTag+${BUILD_NUMBER}+g" java-maven-sonar-argocd-helm-k8s/spring-boot-app-manifests/deployment.yml
 
             git add java-maven-sonar-argocd-helm-k8s/spring-boot-app-manifests/deployment.yml
-            git commit -m "chore: bump docker image tag to ${BUILD_NUMBER} [skip ci]" || true
+            git commit -m "chore: bump docker image tag to ${BUILD_NUMBER}" || true
 
             git push https://${GITHUB_TOKEN}@github.com/${GIT_USER_NAME}/${GIT_REPO_NAME} HEAD:main
           '''
         }
       }
     }
-
-    stage('ArgoCD Sync') {
-      steps {
-        sh '''
-          curl -X POST http://54.242.97.127:8080/argocd/api/v1/applications/devops-app/sync
-        '''
-      }
-    }
   }
 
   post {
     always {
-      sh 'docker system prune -f || true'   // ✅ prevent failure
+      sh 'docker system prune -f || true'
       cleanWs()
     }
   }
