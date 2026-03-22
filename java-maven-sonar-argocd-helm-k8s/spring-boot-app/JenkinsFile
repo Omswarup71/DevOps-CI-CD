@@ -1,85 +1,95 @@
 pipeline {
-agent {
-  docker {
-    image 'maven:3.9.6-eclipse-temurin-17'
-    args '--user root -v /var/run/docker.sock:/var/run/docker.sock -v $HOME/.m2:/root/.m2'
+
+  agent {
+    docker {
+      image 'maven:3.9.6-eclipse-temurin-17'
+      args '--user root -v /var/run/docker.sock:/var/run/docker.sock -v $HOME/.m2:/root/.m2'
+    }
   }
-}
+
+  environment {
+    DOCKER_IMAGE = "iamomswarupnanda/devops-java-app:${BUILD_NUMBER}"
+    SONAR_URL = "http://54.242.97.127:9000"
+    GIT_REPO_NAME = "DevOps-CI-CD"
+    GIT_USER_NAME = "Omswarup71"
+  }
+
   stages {
+
     stage('Checkout') {
       steps {
         git branch: 'main', url: 'https://github.com/Omswarup71/DevOps-CI-CD.git'
       }
     }
+
     stage('Build and Test') {
       steps {
-        sh 'cd java-maven-sonar-argocd-helm-k8s/spring-boot-app && mvn clean package'
+        sh '''
+          cd java-maven-sonar-argocd-helm-k8s/spring-boot-app
+          mvn clean package
+        '''
       }
     }
+
     stage('Static Code Analysis') {
-      environment {
-        SONAR_URL = "http://54.242.97.127:9000"  // YOUR SonarQube
-      }
       steps {
         withCredentials([string(credentialsId: 'sonarqube', variable: 'SONAR_AUTH_TOKEN')]) {
-          sh 'cd java-maven-sonar-argocd-helm-k8s/spring-boot-app && mvn sonar:sonar -Dsonar.login=$SONAR_AUTH_TOKEN -Dsonar.host.url=${SONAR_URL}'
+          sh '''
+            cd java-maven-sonar-argocd-helm-k8s/spring-boot-app
+            mvn sonar:sonar \
+              -Dsonar.login=$SONAR_AUTH_TOKEN \
+              -Dsonar.host.url=${SONAR_URL}
+          '''
         }
       }
     }
+
+    // ✅ FIXED DOCKER STAGE (RUNS ON HOST)
     stage('Build and Push Docker Image') {
-  agent {
-    docker {
-      image 'maven:3.9.6-eclipse-temurin-17'
-      args '--user root -v /var/run/docker.sock:/var/run/docker.sock -v $HOME/.m2:/root/.m2'
-      reuseNode true  // 👈 FIX #1: Docker socket access
-    }
-  }
-  environment {
-    DOCKER_IMAGE = "iamomswarupnanda/devops-java-app:${BUILD_NUMBER}"
-  }
-  steps {
-    script {
-      // Build Docker image
-      sh '''
-        cd java-maven-sonar-argocd-helm-k8s/spring-boot-app && 
-        docker build -t ${DOCKER_IMAGE} .
-      '''
-      
-      // Login & Push
-      withDockerRegistry([credentialsId: 'docker-cred', url: '']) {
-        sh "docker push ${DOCKER_IMAGE}"
+      agent any
+
+      steps {
+        script {
+          sh '''
+            cd java-maven-sonar-argocd-helm-k8s/spring-boot-app
+
+            docker build -t ${DOCKER_IMAGE} .
+          '''
+
+          withDockerRegistry([credentialsId: 'docker-cred', url: '']) {
+            sh "docker push ${DOCKER_IMAGE}"
+          }
+        }
       }
     }
-  }
-}
 
     stage('Update K8s Manifest & Push to Git') {
-      environment {
-        GIT_REPO_NAME = "DevOps-CI-CD"  // YOUR repo
-        GIT_USER_NAME = "Omswarup71"
-      }
       steps {
         withCredentials([string(credentialsId: 'github', variable: 'GITHUB_TOKEN')]) {
           sh '''
             git config user.email "nandaomswarup@gmail.com"
             git config user.name "Omswarup Nanda"
+
             sed -i "s+replaceImageTag+${BUILD_NUMBER}+g" java-maven-sonar-argocd-helm-k8s/spring-boot-app-manifests/deployment.yml
+
             git add java-maven-sonar-argocd-helm-k8s/spring-boot-app-manifests/deployment.yml
             git commit -m "chore: bump docker image tag to ${BUILD_NUMBER} [skip ci]"
+
             git push https://${GITHUB_TOKEN}@github.com/${GIT_USER_NAME}/${GIT_REPO_NAME} HEAD:main
           '''
         }
       }
     }
-    stage('ArgoCD Update (Optional)') {
+
+    stage('ArgoCD Sync') {
       steps {
-        echo "ArgoCD will auto-sync deployment.yml changes from Git"
         sh '''
           curl -X POST http://54.242.97.127:8080/argocd/api/v1/applications/devops-app/sync
         '''
       }
     }
   }
+
   post {
     always {
       sh 'docker system prune -f'
