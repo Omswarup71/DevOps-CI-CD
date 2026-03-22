@@ -1,8 +1,8 @@
 pipeline {
   agent {
     docker {
-      image 'abhishekf5/maven-abhishek-docker-agent:v1'   // ✅ FIXED
-      args '--user root -v /var/run/docker.sock:/var/run/docker.sock -v $HOME/.m2:/root/.m2'
+      image 'abhishekf5/maven-abhishek-docker-agent:v1'
+      args '--user root --network host -v /var/run/docker.sock:/var/run/docker.sock -v $HOME/.m2:/root/.m2'
     }
   }
 
@@ -30,23 +30,31 @@ pipeline {
       }
     }
 
-  stage('Static Code Analysis') {
-  steps {
-    withCredentials([string(credentialsId: 'sonarqube', variable: 'SONAR_AUTH_TOKEN')]) {
-      sh '''
-        cd java-maven-sonar-argocd-helm-k8s/spring-boot-app
-        mvn sonar:sonar \
-          -Dsonar.token=$SONAR_AUTH_TOKEN \
-          -Dsonar.host.url=${SONAR_URL}
-      '''
+    // ✅ FIXED SONAR STAGE
+    stage('Static Code Analysis') {
+      steps {
+        withCredentials([string(credentialsId: 'sonarqube', variable: 'SONAR_AUTH_TOKEN')]) {
+          sh '''
+            cd java-maven-sonar-argocd-helm-k8s/spring-boot-app
+
+            curl -I ${SONAR_URL}   # ✅ DEBUG (must return 200)
+
+            mvn sonar:sonar \
+              -Dsonar.projectKey=devops-java-app \
+              -Dsonar.projectName=devops-java-app \
+              -Dsonar.token=$SONAR_AUTH_TOKEN \
+              -Dsonar.host.url=${SONAR_URL}
+          '''
+        }
+      }
     }
-  }
-}
+
+    // ✅ DOCKER WORKS HERE
     stage('Build and Push Docker Image') {
       steps {
         script {
           sh '''
-            docker version   # ✅ debug
+            docker version
 
             cd java-maven-sonar-argocd-helm-k8s/spring-boot-app
 
