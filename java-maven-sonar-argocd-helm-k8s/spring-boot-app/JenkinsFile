@@ -1,6 +1,11 @@
 pipeline {
 
-  agent any   // ✅ SINGLE NODE, SAME WORKSPACE
+  agent {
+    docker {
+      image 'maven:3.9.6-eclipse-temurin-17'
+      args '--user root -v /var/run/docker.sock:/var/run/docker.sock -v $HOME/.m2:/root/.m2'
+    }
+  }
 
   environment {
     DOCKER_IMAGE = "iamomswarupnanda/devops-java-app:${BUILD_NUMBER}"
@@ -32,27 +37,34 @@ pipeline {
           sh '''
             cd java-maven-sonar-argocd-helm-k8s/spring-boot-app
             mvn sonar:sonar \
-              -Dsonar.token=$SONAR_AUTH_TOKEN \
+              -Dsonar.login=$SONAR_AUTH_TOKEN \
               -Dsonar.host.url=${SONAR_URL}
           '''
         }
       }
     }
 
+    // ✅ FIXED DOCKER STAGE
     stage('Build and Push Docker Image') {
+      agent {
+        label ''   // 👈 forces host execution but keeps SAME workspace
+      }
+
       steps {
-        sh '''
-          docker version
+        script {
+          sh '''
+            docker version   # ✅ check docker available
 
-          cd java-maven-sonar-argocd-helm-k8s/spring-boot-app
+            cd java-maven-sonar-argocd-helm-k8s/spring-boot-app
 
-          ls -l target   # ✅ DEBUG (check jar exists)
+            ls -l target     # ✅ ensure jar exists
 
-          docker build -t ${DOCKER_IMAGE} .
-        '''
+            docker build -t ${DOCKER_IMAGE} .
+          '''
 
-        withDockerRegistry([credentialsId: 'docker-cred', url: '' ]) {
-          sh "docker push ${DOCKER_IMAGE}"
+          withDockerRegistry([credentialsId: 'docker-cred', url: '']) {
+            sh "docker push ${DOCKER_IMAGE}"
+          }
         }
       }
     }
@@ -86,7 +98,7 @@ pipeline {
 
   post {
     always {
-      sh 'docker system prune -f || true'
+      sh 'docker system prune -f || true'   // ✅ prevent failure
       cleanWs()
     }
   }
