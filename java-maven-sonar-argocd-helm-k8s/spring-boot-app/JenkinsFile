@@ -1,6 +1,6 @@
 pipeline {
 
-  agent none   // 👈 VERY IMPORTANT
+  agent any   // ✅ SINGLE NODE, SAME WORKSPACE
 
   environment {
     DOCKER_IMAGE = "iamomswarupnanda/devops-java-app:${BUILD_NUMBER}"
@@ -12,19 +12,12 @@ pipeline {
   stages {
 
     stage('Checkout') {
-      agent any
       steps {
         git branch: 'main', url: 'https://github.com/Omswarup71/DevOps-CI-CD.git'
       }
     }
 
     stage('Build and Test') {
-      agent {
-        docker {
-          image 'maven:3.9.6-eclipse-temurin-17'
-          args '-v $HOME/.m2:/root/.m2'
-        }
-      }
       steps {
         sh '''
           cd java-maven-sonar-argocd-helm-k8s/spring-boot-app
@@ -34,12 +27,6 @@ pipeline {
     }
 
     stage('Static Code Analysis') {
-      agent {
-        docker {
-          image 'maven:3.9.6-eclipse-temurin-17'
-          args '-v $HOME/.m2:/root/.m2'
-        }
-      }
       steps {
         withCredentials([string(credentialsId: 'sonarqube', variable: 'SONAR_AUTH_TOKEN')]) {
           sh '''
@@ -52,15 +39,14 @@ pipeline {
       }
     }
 
-    // ✅ DOCKER RUNS ON HOST
     stage('Build and Push Docker Image') {
-      agent any
-
       steps {
         sh '''
-          docker version   # DEBUG
+          docker version
 
           cd java-maven-sonar-argocd-helm-k8s/spring-boot-app
+
+          ls -l target   # ✅ DEBUG (check jar exists)
 
           docker build -t ${DOCKER_IMAGE} .
         '''
@@ -72,7 +58,6 @@ pipeline {
     }
 
     stage('Update K8s Manifest & Push to Git') {
-      agent any
       steps {
         withCredentials([string(credentialsId: 'github', variable: 'GITHUB_TOKEN')]) {
           sh '''
@@ -91,7 +76,6 @@ pipeline {
     }
 
     stage('ArgoCD Sync') {
-      agent any
       steps {
         sh '''
           curl -X POST http://54.242.97.127:8080/argocd/api/v1/applications/devops-app/sync
